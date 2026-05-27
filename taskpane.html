@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASE Invoice Extractor</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+    :root{
+      --bg:#0f1117;--surface:#1a1d27;--border:#2e3244;
+      --accent:#f5a623;--success:#3ecf8e;--error:#f04e4e;
+      --text:#e8eaf0;--muted:#7a7f9a;
+      --c-invoice:#4a9eff;--c-spending:#a78bfa;--c-return:#f87171;
+      --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:12px;min-height:100vh}
+    .header{background:var(--surface);border-bottom:2px solid var(--accent);padding:12px 16px;display:flex;align-items:center;gap:10px}
+    .header-logo{width:28px;height:28px;background:var(--accent);border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;font-weight:600;color:#000}
+    .header-title{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.5px}
+    .header-sub{font-size:10px;color:var(--muted);font-family:var(--mono)}
+    .section{padding:14px 16px;border-bottom:1px solid var(--border)}
+    .label{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+    input[type="password"]{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:3px;outline:none;transition:border-color .15s}
+    input[type="password"]:focus{border-color:var(--accent)}
+    .drop-zone{border:1.5px dashed var(--border);border-radius:4px;padding:18px 12px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;position:relative}
+    .drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:rgba(245,166,35,.05)}
+    .drop-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .drop-icon{font-size:22px;margin-bottom:4px}
+    .drop-text{color:var(--muted);font-size:11px}.drop-text span{color:var(--accent)}
+    .file-list{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+    .file-chip{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:4px 8px;font-family:var(--mono);font-size:10px}
+    .file-chip .remove{margin-left:auto;cursor:pointer;color:var(--muted);font-size:13px;line-height:1}
+    .file-chip .remove:hover{color:var(--error)}
+    .run-btn{width:100%;padding:10px;background:var(--accent);color:#000;border:none;border-radius:3px;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:opacity .15s,transform .1s;text-transform:uppercase}
+    .run-btn:hover:not(:disabled){opacity:.88}
+    .run-btn:active:not(:disabled){transform:scale(.99)}
+    .run-btn:disabled{opacity:.35;cursor:not-allowed}
+    .dl-btn{width:100%;padding:9px;background:transparent;color:var(--success);border:1px solid var(--success);border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:background .15s;text-transform:uppercase;margin-top:10px}
+    .dl-btn:hover{background:rgba(62,207,142,.1)}
+    .status-bar{padding:8px 16px;font-family:var(--mono);font-size:10px;color:var(--muted);min-height:28px;border-bottom:1px solid var(--border)}
+    .status-bar.ok{color:var(--success)}.status-bar.err{color:var(--error)}
+    .progress-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+    .steps{display:flex;flex-direction:column;gap:6px}
+    .step{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--muted);transition:color .2s}
+    .step-dot{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background .2s}
+    .step.active{color:var(--accent)}.step.active .step-dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+    .step.done{color:var(--success)}.step.done .step-dot{background:var(--success)}
+    .step.err{color:var(--error)}.step.err .step-dot{background:var(--error)}
+    .summary-section{padding:14px 16px}
+    .cat-block{margin-bottom:14px}
+    .cat-header{font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;padding:4px 6px;border-radius:3px 3px 0 0}
+    .cat-invoice .cat-header{background:rgba(74,158,255,.15);color:var(--c-invoice);border:1px solid rgba(74,158,255,.3)}
+    .cat-spending .cat-header{background:rgba(167,139,250,.15);color:var(--c-spending);border:1px solid rgba(167,139,250,.3)}
+    .cat-return .cat-header{background:rgba(248,113,113,.15);color:var(--c-return);border:1px solid rgba(248,113,113,.3)}
+    .summary-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px}
+    .summary-table th{background:var(--surface);color:var(--muted);padding:5px 6px;text-align:left;border:1px solid var(--border);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+    .summary-table td{padding:4px 6px;border:1px solid var(--border);color:var(--text)}
+    .summary-table tr:hover td{background:rgba(255,255,255,.02)}
+    .warn-box{margin-top:10px;background:rgba(240,78,78,.08);border:1px solid var(--error);border-radius:3px;padding:8px 10px;font-family:var(--mono);font-size:10px;color:var(--error)}
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo">ASE</div>
+  <div>
+    <div class="header-title">Invoice Extractor</div>
+    <div class="header-sub">TOMBALL ASE AUTO REPAIR LLC</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Anthropic API Key</div>
+  <input type="password" id="apiKey" placeholder="sk-ant-api03-..." autocomplete="off" />
+</div>
+
+<div class="section">
+  <div class="label">Invoice PDF(s)</div>
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="pdfInput" accept=".pdf" multiple onchange="handleFiles(this.files)" />
+    <div class="drop-icon">📄</div>
+    <div class="drop-text">Drop PDFs here or <span>browse</span></div>
+  </div>
+  <div class="file-list" id="fileList"></div>
+</div>
+
+<div class="section">
+  <button class="run-btn" id="runBtn" onclick="runExtraction()">⚡ Extract &amp; Write to Sheets</button>
+</div>
+
+<div class="status-bar" id="statusBar">Ready</div>
+
+<div class="progress-section" id="progressSection" style="display:none">
+  <div class="label">Progress</div>
+  <div class="steps" id="stepsContainer"></div>
+</div>
+
+<div class="summary-section" id="summarySection" style="display:none">
+  <div class="label">Summary</div>
+  <div id="summaryContent"></div>
+  <button class="dl-btn" id="dlBtn" style="display:none" onclick="downloadZip()">📦 Download Annotation ZIP</button>
+</div>
+
+<script>
+/* ─── GLOBALS ─── */
+let selectedFiles = [];
+let zipBlob = null;  // holds generated ZIP for download
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const STEP_LABELS = [
+  'Reading PDF(s)',
+  'Calling Anthropic API',
+  'Parsing & categorizing',
+  'Looking up POs in 2026',
+  'Writing → invoice sheet',
+  'Writing → spending sheet',
+  'Writing → return tracking',
+  'Applying AutoFilters',
+  'Generating annotation ZIP',
+  '✓ Complete'
+];
+
+const CAT_COLORS = {
+  invoice:  { stroke:'#4a9eff', fill:'rgba(74,158,255,0.18)',  label:'INVOICE'  },
+  spending: { stroke:'#a78bfa', fill:'rgba(167,139,250,0.18)', label:'SPENDING' },
+  return:   { stroke:'#f87171', fill:'rgba(248,113,113,0.18)', label:'RETURN'   },
+};
+
+/* ─── INIT ─── */
+Office.onReady(() => {
+  const saved = localStorage.getItem('ase_api_key');
+  if (saved) document.getElementById('apiKey').value = saved;
+  const dz = document.getElementById('dropZone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+});
+
+/* ─── FILES ─── */
+function handleFiles(list) {
+  for (const f of list)
+    if (f.type === 'application/pdf' && !selectedFiles.find(x => x.name === f.name)) selectedFiles.push(f);
+  renderFileList();
+}
+function removeFile(name) { selectedFiles = selectedFiles.filter(f => f.name !== name); renderFileList(); }
+function renderFileList() {
+  document.getElementById('fileList').innerHTML = selectedFiles.map(f =>
+    `<div class="file-chip">📄 ${f.name}<span class="remove" onclick="removeFile('${f.name}')">×</span></div>`
+  ).join('');
+}
+
+/* ─── UI ─── */
+function setStatus(msg, type='') {
+  const el = document.getElementById('statusBar');
+  el.textContent = msg; el.className = 'status-bar '+type;
+}
+function renderSteps(activeIdx, errIdx=-1) {
+  document.getElementById('progressSection').style.display = 'block';
+  document.getElementById('stepsContainer').innerHTML = STEP_LABELS.map((label,i) => {
+    const cls = i===errIdx?'err':i<activeIdx?'done':i===activeIdx?'active':'';
+    return `<div class="step ${cls}"><span class="step-dot"></span>${label}</div>`;
+  }).join('');
+}
+
+/* ─── UTILS ─── */
+function pdfToBase64(file) {
+  return new Promise((res,rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+function fileToArrayBuffer(file) {
+  return new Promise((res,rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsArrayBuffer(file);
+  });
+}
+function colIndexToLetter(index) {
+  let col='',n=index+1;
+  while(n>0){const rem=(n-1)%26;col=String.fromCharCode(65+rem)+col;n=Math.floor((n-1)/26);}
+  return col;
+}
+function getNextItemCol(rowValues) {
+  let c=12;
+  while(c<rowValues.length){
+    if(rowValues[c]===null||rowValues[c]===undefined||rowValues[c]==='') return c;
+    c+=2;
+    while(c<rowValues.length&&rowValues[c]!==null&&rowValues[c]!==undefined&&rowValues[c]!=='') c+=2;
+  }
+  return c;
+}
+function buildVendorKey(vendor,invoiceNum) {
+  const v=(vendor||'').toUpperCase().replace(/[\s']/g,'');
+  const MAP={AUTOZONE:'AUTOZONE',OREILLY:'OREILLY',ORIELLY:'OREILLY',OREILLYAUTO:'OREILLY',
+    XLPARTS:'XLPARTS',XL:'XLPARTS',LKQ:'LKQ',EMPIRE:'EMPIRE',AMAZON:'AMAZON',EBAY:'EBAY',
+    FREDHAAS:'FREDHAAS',FREDHAASTROYOTA:'FREDHAAS',PLANETFORD:'PLANETFORD',
+    PARKWAYCHEVROLET:'PARKWAYCHEV',PARKWAY:'PARKWAYCHEV','1800RADIATOR':'1800RADIATOR',
+    AFFORDABLEAUTOGLASS:'AFFORDABLEGLASS',AFFORDABLEGLASS:'AFFORDABLEGLASS',
+    TOMBALLAUTO:'TOMBALLAUTO',TOMBALLAUTOGL:'TOMBALLAUTO',ELCHINO:'ELCHINO',
+    SEWELL:'SEWELL',HONDA:'HONDA'};
+  return `${MAP[v]||v}#${invoiceNum}`;
+}
+
+/* ─── ANTHROPIC API ─── */
+async function callAnthropicAPI(apiKey, base64Pdfs, fileNames) {
+  const content = base64Pdfs.map(b64 => ({
+    type:'document', source:{type:'base64',media_type:'application/pdf',data:b64}
+  }));
+
+  content.push({type:'text', text:`You are an invoice extraction engine for TOMBALL ASE AUTO REPAIR LLC.
+Extract ALL invoices. Return ONLY a JSON array, no markdown, no preamble.
+
+CATEGORY RULES:
+- "invoice"  → page has ANY handwritten/center-ink 4-digit ASE PO. If ANY PO on page → invoice, never spending.
+- "spending" → no ASE PO on the page
+- "return"   → credit memo, return, or refund
+
+AMOUNT RULES:
+- invoice/spending: PRE-TAX extended price only, numeric
+- return: AFTER-TAX amount, always POSITIVE numeric
+- Core charges: separate item immediately after parent part
+
+PAYMENT STATUS: ES→N, BD→N. Keep Y/W/PARTIAL/DEPOSITED/GIFTED as-is.
+Amazon/eBay: payment_type always "6557".
+PO numbers: handwritten/center-ink only, exactly 4 digits.
+
+VENDOR DETECTION:
+AUTOZONE→01477/06223 | OREILLY→0506-X | XLPARTS→0032IA/IB | LKQ→174X
+EMPIRE→403X | AMAZON→111-X/112-X | EBAY→XX-XXXXX-XXXXX
+Others: FREDHAAS, PLANETFORD, PARKWAYCHEV, 1800RADIATOR,
+AFFORDABLEGLASS, TOMBALLAUTO, ELCHINO, SEWELL, HONDA
+
+Include "file_index" (0-based index into the provided PDFs) and "page" (1-based page number within that PDF) for each invoice.
+
+Return ONLY valid JSON array:
+[
+  {
+    "category":"invoice","file_index":0,"page":1,
+    "po":"1234","vendor":"AUTOZONE","invoice_num":"01477919784",
+    "paid":"N","payment_type":"",
+    "items":[{"desc":"ALTERNATOR","price":268.95},{"desc":"CORE CHARGE","price":18.00}]
+  }
+]`});
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,
+      'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4096,
+      messages:[{role:'user',content}]})
+  });
+  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error?.message||`API HTTP ${resp.status}`);}
+  const data=await resp.json();
+  const raw=(data.content.find(b=>b.type==='text')?.text||'').trim();
+  return JSON.parse(raw.replace(/^```json\s*/i,'').replace(/```\s*$/,'').trim());
+}
+
+/* ─── EXCEL HELPERS ─── */
+async function lookupPOsIn2026(context,uniquePOs){
+  const sheet=context.workbook.worksheets.getItem('2026');
+  const usedRange=sheet.getUsedRange(true);usedRange.load('rowCount');await context.sync();
+  const lastRow=usedRange.rowCount,targets=new Set(uniquePOs.map(p=>parseInt(p)));
+  const found={},missing=[];
+  for(let start=2;start<=lastRow;start+=1000){
+    const end=Math.min(start+999,lastRow);
+    const range=sheet.getRange(`A${start}:L${end}`);range.load('values');await context.sync();
+    for(let i=0;i<range.values.length;i++){
+      const poVal=parseInt(range.values[i][0]);
+      if(targets.has(poVal)&&!found[String(poVal)]){
+        found[String(poVal)]={row:start+i,date:range.values[i][1],paid:range.values[i][2],
+          paidDate:range.values[i][3],paymentType:range.values[i][4],employee:range.values[i][5],
+          customer:range.values[i][6],contact:range.values[i][7],licensePlate:range.values[i][8],
+          vehicle:range.values[i][9],vin:range.values[i][10],mileage:range.values[i][11]};
+      }
+    }
+  }
+  for(const t of targets){if(!found[String(t)])missing.push(t);}
+  return{found,missing};
+}
+async function findRowInSheet(context,sheetName,poNum){
+  const sheet=context.workbook.worksheets.getItem(sheetName);
+  const usedRange=sheet.getUsedRange(true);usedRange.load('rowCount');await context.sync();
+  const lastRow=usedRange.rowCount,target=parseInt(poNum);
+  for(let start=2;start<=lastRow;start+=1000){
+    const end=Math.min(start+999,lastRow);
+    const range=sheet.getRange(`A${start}:A${end}`);range.load('values');await context.sync();
+    for(let i=0;i<range.values.length;i++){
+      if(parseInt(range.values[i][0])===target)return start+i;
+    }
+  }
+  return null;
+}
+async function writeInvoiceGroup(context,sheetName,rowIdx,inv){
+  const sheet=context.workbook.worksheets.getItem(sheetName);
+  const readRange=sheet.getRange(`A${rowIdx}:${colIndexToLetter(511)}${rowIdx}`);
+  readRange.load('values');await context.sync();
+  const nextCol=getNextItemCol(readRange.values[0]);
+  const vendorKey=buildVendorKey(inv.vendor,inv.invoice_num);
+  const writeArr=[vendorKey,''];
+  for(const item of(inv.items||[]))writeArr.push(String(item.desc).toUpperCase(),parseFloat(item.price)||0);
+  const s=colIndexToLetter(nextCol),e=colIndexToLetter(nextCol+writeArr.length-1);
+  sheet.getRange(`${s}${rowIdx}:${e}${rowIdx}`).values=[writeArr];
+  await context.sync();
+}
+async function appendSpendingRow(context,inv){
+  const sheet=context.workbook.worksheets.getItem('spending');
+  const usedRange=sheet.getUsedRange(true);usedRange.load('rowCount');await context.sync();
+  const newRow=usedRange.rowCount+1;
+  const vendorKey=buildVendorKey(inv.vendor,inv.invoice_num);
+  sheet.getRange(`A${newRow}`).values=[[inv.invoice_num||vendorKey]];
+  const writeArr=[vendorKey,''];
+  for(const item of(inv.items||[]))writeArr.push(String(item.desc).toUpperCase(),parseFloat(item.price)||0);
+  sheet.getRange(`M${newRow}:${colIndexToLetter(12+writeArr.length-1)}${newRow}`).values=[writeArr];
+  await context.sync();
+  return newRow;
+}
+async function applyFilter(context,sheetName,values){
+  if(!values.length)return;
+  const sheet=context.workbook.worksheets.getItem(sheetName);
+  try{sheet.autoFilter.clearCriteria();await context.sync();}catch(e){}
+  sheet.autoFilter.apply(sheet.getUsedRange(),0,{filterOn:Excel.FilterOn.values,values});
+  await context.sync();
+}
+
+/* ─── ANNOTATION ZIP ─── */
+async function generateAnnotationZip(files, invoices) {
+  const zip = new JSZip();
+  const today = new Date();
+  const mmdd = String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi];
+    const baseName = file.name.replace(/\.pdf$/i,'');
+    const arrayBuffer = await fileToArrayBuffer(file);
+    const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const numPages = pdfDoc.numPages;
+
+    // Get invoices for this file
+    const fileInvoices = invoices.filter(inv => (inv.file_index ?? 0) === fi);
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+
+      // Render PDF page
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      // Get invoices for this page
+      const pageInvoices = fileInvoices.filter(inv => (inv.page ?? 1) === pageNum);
+
+      if (pageInvoices.length > 0) {
+        drawAnnotations(ctx, canvas.width, canvas.height, pageInvoices);
+      }
+
+      // Export to PNG and add to ZIP
+      const pngBlob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      const pngBuffer = await pngBlob.arrayBuffer();
+      const fileName = `${baseName}_p${String(pageNum).padStart(2,'0')}.png`;
+      zip.file(fileName, pngBuffer);
+    }
+  }
+
+  return await zip.generateAsync({ type: 'blob' });
+}
+
+function drawAnnotations(ctx, canvasW, canvasH, invoices) {
+  const PADDING = 12;
+  const LINE_H  = 16;
+  const BOX_W   = Math.min(260, canvasW * 0.38);
+
+  let yOffset = PADDING;
+
+  for (const inv of invoices) {
+    const cat = inv.category || 'invoice';
+    const colors = CAT_COLORS[cat] || CAT_COLORS.invoice;
+    const total = (inv.items||[]).reduce((s,i)=>s+(parseFloat(i.price)||0),0);
+
+    // Build lines
+    const lines = [
+      `▌ ${colors.label}`,
+      inv.po   ? `PO: ${inv.po}`          : null,
+      `VENDOR: ${inv.vendor||'—'}`,
+      `INV#: ${inv.invoice_num||'—'}`,
+      `PAID: ${inv.paid||'?'}`,
+      '─────────────────',
+      ...(inv.items||[]).map(i=>`${String(i.desc).substring(0,20).padEnd(20)} $${parseFloat(i.price).toFixed(2)}`),
+      '─────────────────',
+      `TOTAL PRE-TAX: $${total.toFixed(2)}`,
+    ].filter(Boolean);
+
+    const boxH = lines.length * LINE_H + PADDING * 2;
+    const x = canvasW - BOX_W - PADDING;
+    const y = yOffset;
+
+    // Shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+
+    // Background
+    ctx.fillStyle = 'rgba(10,12,20,0.88)';
+    roundRect(ctx, x, y, BOX_W, boxH, 6);
+    ctx.fill();
+
+    // Border
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = colors.stroke;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x, y, BOX_W, boxH, 6);
+    ctx.stroke();
+
+    // Left accent bar
+    ctx.fillStyle = colors.stroke;
+    ctx.fillRect(x, y+6, 3, boxH-12);
+
+    // Text
+    ctx.font = `600 11px 'Courier New', monospace`;
+    ctx.fillStyle = colors.stroke;
+    ctx.shadowColor = 'transparent';
+
+    for (let li = 0; li < lines.length; li++) {
+      const lineY = y + PADDING + li * LINE_H + 10;
+      const line = lines[li];
+      if (line.startsWith('─')) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x + 8, lineY - 4);
+        ctx.lineTo(x + BOX_W - 8, lineY - 4);
+        ctx.stroke();
+      } else if (li === 0) {
+        ctx.font = `700 11px 'Courier New', monospace`;
+        ctx.fillStyle = colors.stroke;
+        ctx.fillText(line, x + 10, lineY);
+      } else {
+        ctx.font = `400 10px 'Courier New', monospace`;
+        ctx.fillStyle = '#e0e4f0';
+        ctx.fillText(line.substring(0, 34), x + 10, lineY);
+      }
+    }
+
+    yOffset += boxH + 8;
+    if (yOffset + 80 > canvasH) yOffset = PADDING; // wrap if near bottom
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+function downloadZip() {
+  if (!zipBlob) return;
+  const today = new Date();
+  const mmdd = String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `annotated_${mmdd}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════
+   MAIN
+═══════════════════════════════════════════ */
+async function runExtraction() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) { setStatus('⚠ Enter Anthropic API key.','err'); return; }
+  if (!selectedFiles.length) { setStatus('⚠ Select at least one PDF.','err'); return; }
+
+  localStorage.setItem('ase_api_key', apiKey);
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('summarySection').style.display = 'none';
+  document.getElementById('dlBtn').style.display = 'none';
+  zipBlob = null;
+
+  const summary = { invoice:[], spending:[], return:[], missing:[] };
+
+  try {
+    // 0: Read
+    renderSteps(0); setStatus('Reading PDF(s)...');
+    const base64Pdfs = await Promise.all(selectedFiles.map(pdfToBase64));
+
+    // 1: API
+    renderSteps(1); setStatus('Calling Anthropic API...');
+    let invoices;
+    try { invoices = await callAnthropicAPI(apiKey, base64Pdfs, selectedFiles.map(f=>f.name)); }
+    catch(e) { renderSteps(1,1); throw new Error('API: '+e.message); }
+
+    // 2: Normalize
+    renderSteps(2); setStatus('Categorizing...');
+    if (!Array.isArray(invoices)||!invoices.length) throw new Error('No invoices returned.');
+    invoices.forEach(inv => {
+      if(inv.paid==='ES'||inv.paid==='BD') inv.paid='N';
+      const v=(inv.vendor||'').toUpperCase();
+      if((v==='AMAZON'||v==='EBAY')&&!inv.payment_type) inv.payment_type='6557';
+    });
+
+    const invoiceGroup  = invoices.filter(i=>i.category==='invoice');
+    const spendingGroup = invoices.filter(i=>i.category==='spending');
+    const returnGroup   = invoices.filter(i=>i.category==='return');
+
+    // 3: PO lookup
+    renderSteps(3); setStatus('Looking up POs in 2026...');
+    const allPOs = [...new Set([...invoiceGroup,...returnGroup].map(i=>i.po).filter(Boolean))];
+    let found2026={}, missing2026=[];
+    if (allPOs.length) {
+      await Excel.run(async context => {
+        const result = await lookupPOsIn2026(context, allPOs);
+        found2026 = result.found; missing2026 = result.missing;
+      });
+    }
+    summary.missing = missing2026;
+
+    // 4: Write invoice
+    renderSteps(4); setStatus('Writing invoice sheet...');
+    const invoicePOs = new Set();
+    await Excel.run(async context => {
+      for (const inv of invoiceGroup) {
+        const po = String(inv.po);
+        const rowInfo = found2026[po];
+        const targetRow = await findRowInSheet(context,'invoice',po);
+        if (!targetRow) { summary.missing.push(`invoice:${po}`); summary.invoice.push({po,customer:rowInfo?.customer||'—',vendor:inv.vendor,invoice:inv.invoice_num,items:inv.items||[],warn:true}); continue; }
+        await writeInvoiceGroup(context,'invoice',targetRow,inv);
+        invoicePOs.add(po);
+        summary.invoice.push({po,customer:rowInfo?.customer||'—',vendor:inv.vendor,invoice:inv.invoice_num,items:inv.items||[]});
+      }
+    });
+
+    // 5: Write spending
+    renderSteps(5); setStatus('Writing spending sheet...');
+    await Excel.run(async context => {
+      for (const inv of spendingGroup) {
+        await appendSpendingRow(context, inv);
+        summary.spending.push({po:'—',customer:'—',vendor:inv.vendor,invoice:inv.invoice_num,items:inv.items||[]});
+      }
+    });
+
+    // 6: Write returns
+    renderSteps(6); setStatus('Writing return tracking sheet...');
+    const returnPOs = new Set();
+    await Excel.run(async context => {
+      for (const inv of returnGroup) {
+        const po = String(inv.po||'');
+        let targetRow = po ? await findRowInSheet(context,'return tracking',po) : null;
+        if (!targetRow) {
+          const sheet = context.workbook.worksheets.getItem('return tracking');
+          const u = sheet.getUsedRange(true); u.load('rowCount'); await context.sync();
+          targetRow = u.rowCount+1;
+          if (po) { sheet.getRange(`A${targetRow}`).values=[[parseInt(po)||po]]; await context.sync(); }
+        }
+        await writeInvoiceGroup(context,'return tracking',targetRow,inv);
+        if (po) returnPOs.add(po);
+        const rowInfo = po ? found2026[po] : null;
+        summary.return.push({po:po||'—',customer:rowInfo?.customer||'—',vendor:inv.vendor,invoice:inv.invoice_num,items:inv.items||[]});
+      }
+    });
+
+    // 7: AutoFilter
+    renderSteps(7); setStatus('Applying AutoFilters...');
+    await Excel.run(async context => {
+      if (invoicePOs.size) await applyFilter(context,'invoice',[...invoicePOs]);
+      if (returnPOs.size)  await applyFilter(context,'return tracking',[...returnPOs]);
+    });
+
+    // 8: Annotation ZIP
+    renderSteps(8); setStatus('Generating annotation ZIP...');
+    zipBlob = await generateAnnotationZip(selectedFiles, invoices);
+
+    // Done
+    renderSteps(9);
+    const total = summary.invoice.length + summary.spending.length + summary.return.length;
+    setStatus(`Done — ${total} invoice(s) written.`, 'ok');
+    renderSummary(summary);
+    document.getElementById('dlBtn').style.display = 'block';
+
+  } catch(e) {
+    setStatus('Error: '+e.message,'err');
+    console.error(e);
+  } finally {
+    document.getElementById('runBtn').disabled = false;
+  }
+}
+
+/* ─── SUMMARY ─── */
+function renderSummary(summary) {
+  document.getElementById('summarySection').style.display = 'block';
+  const cats = [
+    {key:'invoice', label:'📋 Invoice (PO Tracking)', cls:'cat-invoice'},
+    {key:'spending',label:'💸 Spending',              cls:'cat-spending'},
+    {key:'return',  label:'↩ Return Tracking',        cls:'cat-return'},
+  ];
+  let html = '';
+  for (const cat of cats) {
+    const rows = summary[cat.key];
+    if (!rows.length) continue;
+    const total = rows.reduce((s,r)=>s+r.items.reduce((is,i)=>is+(parseFloat(i.price)||0),0),0);
+    html += `<div class="cat-block ${cat.cls}">
+      <div class="cat-header">${cat.label} — ${rows.length} · $${total.toFixed(2)}</div>
+      <table class="summary-table">
+        <tr><th>PO</th><th>Customer</th><th>Vendor</th><th>Invoice #</th><th>Amt</th></tr>
+        ${rows.map(r=>{
+          const t=r.items.reduce((s,i)=>s+(parseFloat(i.price)||0),0);
+          return `<tr><td>${r.po}</td><td>${r.customer}</td><td>${r.vendor}</td><td>${r.invoice}</td><td>$${t.toFixed(2)}</td></tr>`;
+        }).join('')}
+      </table></div>`;
+  }
+  if (summary.missing.length)
+    html += `<div class="warn-box">⚠ MISSING: ${summary.missing.join(', ')}</div>`;
+  document.getElementById('summaryContent').innerHTML = html;
+}
+</script>
+</body>
+</html>
